@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D Endless Runner – Step 7 PowerUps</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+body{margin:0;overflow:hidden;background:black;font-family:sans-serif}
+#ui{position:fixed;top:10px;left:10px;color:white;font-size:18px;z-index:10}
+#power{position:fixed;top:40px;left:10px;color:#0f0;font-size:14px}
+#jump{position:fixed;bottom:20px;right:20px;padding:20px;border-radius:50%;background:#ff9800;border:none;font-size:16px;color:white}
+#gameover{position:fixed;top:40%;width:100%;text-align:center;color:red;font-size:32px;display:none}
+</style>
+</head>
+
+<body>
+
+<div id="ui">Score: <span id="score">0</span></div>
+<div id="power"></div>
+<div id="gameover">GAME OVER<br>Refresh to Restart</div>
+<button id="jump">JUMP</button>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.158/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.158/examples/js/loaders/GLTFLoader.js"></script>
+
+<script>
+/* ========== SCENE ========== */
+const scene=new THREE.Scene();
+scene.fog=new THREE.Fog(0x000000,15,90);
+
+const camera=new THREE.PerspectiveCamera(70,innerWidth/innerHeight,0.1,1000);
+camera.position.set(0,3.5,6);
+
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.shadowMap.enabled=true;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.outputColorSpace=THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+/* ========== LIGHT ========== */
+scene.add(new THREE.AmbientLight(0xffffff,0.4));
+const light=new THREE.DirectionalLight(0xffffff,1);
+light.position.set(5,10,5);
+scene.add(light);
+
+/* ========== LANES ========== */
+const lanes=[-2,0,2];
+let lane=1,targetX=0;
+
+/* ========== PLAYER ========== */
+let player,mixer;
+const clock=new THREE.Clock();
+
+new THREE.GLTFLoader().load(
+ "https://threejs.org/examples/models/gltf/Soldier.glb",
+ g=>{
+  player=g.scene;
+  player.scale.set(1.4,1.4,1.4);
+  scene.add(player);
+  mixer=new THREE.AnimationMixer(player);
+  mixer.clipAction(g.animations[3]).play();
+ }
+);
+
+/* ========== GROUND ========== */
+const grounds=[];
+for(let i=0;i<3;i++){
+ let g=new THREE.Mesh(
+  new THREE.BoxGeometry(7,1,40),
+  new THREE.MeshStandardMaterial({color:0x222222})
+ );
+ g.position.set(0,-0.5,-40*i);
+ scene.add(g); grounds.push(g);
+}
+
+/* ========== OBJECTS ========== */
+const coins=[], obstacles=[], powerups=[];
+const randLane=()=>lanes[Math.floor(Math.random()*3)];
+
+function spawnCoin(z){
+ let c=new THREE.Mesh(
+  new THREE.TorusGeometry(0.4,0.15,12,24),
+  new THREE.MeshStandardMaterial({color:0xffd700,emissive:0xffaa00})
+ );
+ c.position.set(randLane(),1.6,z);
+ scene.add(c); coins.push(c);
+}
+
+function spawnObstacle(z){
+ let o=new THREE.Mesh(
+  new THREE.BoxGeometry(1.6,2,1.6),
+  new THREE.MeshStandardMaterial({color:0xff4444})
+ );
+ o.position.set(randLane(),1,z);
+ scene.add(o); obstacles.push(o);
+}
+
+/* POWER UPS */
+function spawnPower(z,type){
+ let color={shield:0x00ffff,magnet:0xff00ff,boost:0x00ff00}[type];
+ let p=new THREE.Mesh(
+  new THREE.SphereGeometry(0.6,16,16),
+  new THREE.MeshStandardMaterial({color,emissive:color})
+ );
+ p.userData.type=type;
+ p.position.set(randLane(),1.6,z);
+ scene.add(p); powerups.push(p);
+}
+
+/* ========== GAME VARS ========== */
+let vy=0,gravity=-0.012,jumping=false;
+let speed=0.26,score=0,alive=true;
+
+/* POWER STATE */
+let shield=false,magnet=false,boost=false;
+let powerText=document.getElementById("power");
+
+/* ========== CONTROLS ========== */
+jump.onclick=()=>{ if(!jumping){vy=0.3;jumping=true;} };
+
+addEventListener("keydown",e=>{
+ if(e.code==="ArrowLeft"&&lane>0){lane--;targetX=lanes[lane];}
+ if(e.code==="ArrowRight"&&lane<2){lane++;targetX=lanes[lane];}
+ if(e.code==="Space") jump.click();
+});
+
+/* ========== SPAWN ========== */
+let spawnZ=-30;
+setInterval(()=>{
+ if(alive){
+  spawnCoin(spawnZ);
+  if(Math.random()>0.6) spawnObstacle(spawnZ-5);
+  if(Math.random()>0.8){
+   let t=["shield","magnet","boost"][Math.floor(Math.random()*3)];
+   spawnPower(spawnZ-8,t);
+  }
+  spawnZ-=20;
+ }
+},1500);
+
+/* ========== COLLISION ========== */
+const hit=(a,b,d=1.3)=>a.position.distanceTo(b.position)<d;
+
+/* ========== LOOP ========== */
+function animate(){
+ requestAnimationFrame(animate);
+ if(!alive) return;
+
+ let dt=clock.getDelta();
+ if(mixer) mixer.update(dt);
+
+ vy+=gravity;
+ if(player){
+  player.position.y+=vy;
+  if(player.position.y<=0){player.position.y=0;vy=0;jumping=false;}
+  player.position.x+=(targetX-player.position.x)*0.15;
+ }
+
+ grounds.forEach(g=>{ g.position.z+=speed; if(g.position.z>10) g.position.z=-80; });
+
+ coins.forEach((c,i)=>{
+  c.position.z+=speed;
+  if(player && hit(player,c)){
+   score+=10; scoreSpan.textContent=score;
+   scene.remove(c); coins.splice(i,1);
+  }
+  if(magnet && player){
+   c.position.x+=(player.position.x-c.position.x)*0.1;
+  }
+ });
+
+ obstacles.forEach((o,i)=>{
+  o.position.z+=speed;
+  if(player && hit(player,o)){
+   if(shield){
+    shield=false; powerText.textContent="";
+    scene.remove(o); obstacles.splice(i,1);
+   }else{
+    alive=false; gameover.style.display="block";
+   }
+  }
+ });
+
+ powerups.forEach((p,i)=>{
+  p.position.z+=speed;
+  if(player && hit(player,p)){
+   activatePower(p.userData.type);
+   scene.remove(p); powerups.splice(i,1);
+  }
+ });
+
+ camera.lookAt(player?player.position:new THREE.Vector3());
+ renderer.render(scene,camera);
+}
+animate();
+
+/* ========== POWER LOGIC ========== */
+function activatePower(type){
+ powerText.textContent=type.toUpperCase()+" ACTIVE";
+ if(type==="shield"){
+  shield=true; setTimeout(()=>shield=false,5000);
+ }
+ if(type==="magnet"){
+  magnet=true; setTimeout(()=>magnet=false,6000);
+ }
+ if(type==="boost"){
+  boost=true; speed=0.4;
+  setTimeout(()=>{boost=false;speed=0.26;},4000);
+ }
+}
+
+/* ========== UI ========== */
+const scoreSpan=document.getElementById("score");
+const gameover=document.getElementById("gameover");
+
+addEventListener("resize",()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+</script>
+</body>
+</html>
